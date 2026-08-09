@@ -1,0 +1,60 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "defaultChat": {
+    "mode": "DEFAULT",
+    "version": "0.0.128",
+    "target": "linux-x64",
+    "adsEnabled": true,
+    "hasSubmittedFirstPrompt": false,
+    "freebuffModel": "mimo/mimo-v2.5-pro",
+    "instanceOwner": {
+      "id": "fd1924c8-2daf-422d-8eb1-f6fc5badc0c6",
+      "name": "ClickyGPT",
+      "email": "clickygpt@gmail.com",
+      "fingerprintId": "enhanced-LeDqdFaZx22QPB03hx2XxvPtVblvea9DjBUhM6DSMWY",
+      "fingerprintHash": "0724ee02831eb1a2aa8deaa0d7af2e9792069731ebc7a44d3cdfce6a1f18162"
+    },
+    "analytics": {
+      "anonymousId": "anon_e908a743-ab44-489e-86b4-77c4c95f3e0f"
+    },
+    "projects": {
+      "defaultRoot": "/home/chairmanmalware",
+      "recentProjects": [
+        {
+          "path": "/home",
+          "lastOpened": 1785038956189
+        },
+        {
+          "path": "/home/chairmanmalware",
+          "lastOpened": 1785034799983
+        }
+      ]
+    },
+    "chatDefaults": {
+      "messageCount": 0,
+      "messagesSize": 0,
+      "messagesMtimeMs": 0,
+      "firstPrompt": null,
+      "uiMode": "LITE",
+      "timestampFormat": "hh:mm A"
+    },
+    "freebuff": {
+      "metadata": {
+        "version": "0.0.128",
+        "target": "linux-x64"
+      },
+      "instanceOwner": {
+        "instanceId": "9c681b34-fbb4-403e-9997-ac6795119f43",
+        "pid": 3682
+      }
+    },
+    "session": {
+      "fileContext": {
+        "projectRoot": "/home",
+        "cwd": "/home",
+        "fileTree": []
+      }
+    },
+    "messageHistory": []
+  }
+}

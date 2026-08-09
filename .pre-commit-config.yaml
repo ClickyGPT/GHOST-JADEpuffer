@@ -1,0 +1,41 @@
+# GHOST-HUNT // x0rTr0n — Pre-commit Hooks
+# Install:  pip install pre-commit && pre-commit install
+# Run all:  pre-commit run --all-files
+
+repos:
+  # ── Ruff (linter + formatter) ──────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      # Linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        stages: [pre-commit]
+      # Formatter
+      - id: ruff-format
+        stages: [pre-commit]
+
+  # ── Pyright (type checker) — manual only ──────────────────────────────────
+  # Run manually:  pre-commit run pyright --all-files
+  # Or use:  make typecheck
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: system
+        types: [python]
+        stages: [manual]
+        pass_filenames: true
+
+  # ── General hygiene ─────────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: debug-statements

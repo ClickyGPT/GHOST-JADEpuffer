@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# C2 runtime artifacts (regenerable)
+c2-local/dns-incoming/
+c2-local/incoming/
+c2-local/recovered/
+c2-local/dns-recovered/
+*.pid
+
+# Freebuff preview logs
+.freebuff/preview-*.log
