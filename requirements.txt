@@ -1,0 +1,8 @@
+# GHOST-HUNT // C2 KIT-DNS — DNS Tunnel
+# Python 3.6+ required
+#
+# NO external dependencies — stdlib only
+# All modules use: base64, hashlib, socket, struct, os, sys, time
+#
+# For development/testing (optional):
+# pytest>=7.0.0

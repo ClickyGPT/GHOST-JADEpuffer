@@ -1,0 +1,147 @@
+name: kit-smoke
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"   # nightly: catch bundle drift and kit regressions
+  workflow_dispatch:       # manual: on-demand stress suite / full validation
+
+# Serialize runs: a rapid sequence of pushes should not double-execute
+# the heavy capacity-stress job (200 MB round-trips).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  kit-smoke:
+    name: ${{ matrix.kit }} / ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # HTTPS kit (needs cryptography; 5 MB round-trip)
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_test.sh,         mode: roundtrip,       args: "",                   needs_cryptography: true  }
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_test.sh,         mode: keep,            args: "--keep",            needs_cryptography: true  }
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_test.sh,         mode: self-test-cover, args: "--self-test-cover", needs_cryptography: true  }
+          # HTTPS chunk-loss (Fernet auth backstop; seq-gap diagnostics)
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_chunk_loss.sh,    mode: chunk-loss,          args: "",                   needs_cryptography: true  }
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_chunk_loss.sh,    mode: chunk-loss-many,      args: "--scenario many",   needs_cryptography: true  }
+          # DNS kit (stdlib-only; 2 KB round-trip, ~82 chunks)
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_test.sh, mode: roundtrip,       args: "",                   needs_cryptography: false }
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_test.sh, mode: keep,            args: "--keep",            needs_cryptography: false }
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_test.sh, mode: self-test-cover, args: "--self-test-cover", needs_cryptography: false }
+          # DNS chunk-loss (all 6 scenarios; tail-loss integrity regression)
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_chunk_loss.sh, mode: chunk-loss,          args: "",                   needs_cryptography: false }
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_chunk_loss.sh, mode: chunk-loss-many,      args: "--scenario many",   needs_cryptography: false }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cryptography (HTTPS kit only)
+        if: matrix.needs_cryptography
+        run: python -m pip install cryptography
+
+      - name: Run ${{ matrix.mode }}
+        run: bash "${{ matrix.script }}" ${{ matrix.args }}
+
+  lint-typecheck:
+    name: ruff + pyright (both kits)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff + pyright (pinned to locally-validated versions)
+        run: python -m pip install ruff==0.16.2 pyright==1.1.411
+
+      # Mirrors the Makefile `lint` target: python -m ruff check *.py test/ --config ../pyproject.toml
+      - name: Ruff lint — HTTPS kit
+        working-directory: GHOST-HUNT-C2-KIT
+        run: python -m ruff check *.py test/ --config ../pyproject.toml
+
+      - name: Ruff lint — DNS kit
+        working-directory: GHOST-HUNT-C2-KIT-DNS
+        run: python -m ruff check *.py test/ --config ../pyproject.toml
+
+      # Mirrors the Makefile `typecheck` target: python -m pyright *.py --pythonversion 3.6
+      # CLI file args (the kit's *.py) take precedence over the root config's
+      # include list, so each step checks exactly its own kit's root modules.
+      # reportMissingImports is disabled in the root config so the lazily-
+      # imported cryptography can't fail the DNS/stdlib-only run.
+      - name: Pyright typecheck — HTTPS kit
+        working-directory: GHOST-HUNT-C2-KIT
+        run: python -m pyright *.py --pythonversion 3.6
+
+      - name: Pyright typecheck — DNS kit
+        working-directory: GHOST-HUNT-C2-KIT-DNS
+        run: python -m pyright *.py --pythonversion 3.6
+
+  capacity-stress:
+    # Nightly capacity re-verification only — 200 MB round-trips are too heavy
+    # to run on every push; the nightly schedule covers drift detection instead.
+    # Also triggerable manually via the Actions UI (workflow_dispatch).
+    name: stress ${{ matrix.kit }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ceiling payloads from VALIDATION.md §2-3 (measured 2026-08-10)
+          - { kit: GHOST-HUNT-C2-KIT,     script: GHOST-HUNT-C2-KIT/test/run_local_test.sh,         args: "--size-mb 200 --chunk-mb 4", needs_cryptography: true  }
+          - { kit: GHOST-HUNT-C2-KIT-DNS, script: GHOST-HUNT-C2-KIT-DNS/test/run_local_dns_test.sh, args: "--size-kb 64 --chunk 60",  needs_cryptography: false }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cryptography (HTTPS kit only)
+        if: matrix.needs_cryptography
+        run: python -m pip install cryptography
+
+      - name: Run capacity stress test
+        run: bash "${{ matrix.script }}" ${{ matrix.args }}
+
+  bundle-drift:
+    # Fast consistency check — runs on every event (not just nightly): any
+    # change to mapped docs/summaries/viewer must regenerate kit-bundle.json.
+    name: explainer bundle drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild bundle in memory and diff against committed artifacts
+        # Fails when mapped docs, summaries, or viewer templates changed
+        # without regenerating kit-bundle.json + the embedded fallback.
+        run: python .freebuff/build-kit-bundle.py --check

